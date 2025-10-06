@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Дашборд отзывов</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin-bottom: 30px;
+        }
+        .filter-section {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+        }
+        .filter-btn {
+            margin: 5px;
+        }
+        .active-filter {
+            background-color: #0d6efd !important;
+            color: white !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-4">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="text-center mb-4">📊 Дашборд анализа отзывов</h1>
+            </div>
+        </div>
+
+        <!-- Статистика -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <h4 id="total-reviews">0</h4>
+                        <p class="mb-0">Всего отзывов</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <h4 id="unique-topics">0</h4>
+                        <p class="mb-0">Уникальных тем</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card">
+                    <div class="card-body text-center">
+                        <h4 id="unique-sentiments">0</h4>
+                        <p class="mb-0">Типов настроений</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Фильтры -->
+        <div class="filter-section">
+            <h5 class="mb-3">🔍 Фильтры</h5>
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Настроения:</h6>
+                    <div id="sentiment-filters" class="mb-3">
+                        <button class="btn btn-outline-primary filter-btn active-filter" onclick="filterData('sentiment', null)">Все</button>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <h6>Темы:</h6>
+                    <div id="topic-filters" class="mb-3">
+                        <button class="btn btn-outline-primary filter-btn active-filter" onclick="filterData('topic', null)">Все</button>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-warning" onclick="clearFilters()">Очистить все фильтры</button>
+            <button class="btn btn-success" onclick="loadData()">Обновить данные</button>
+        </div>
+
+        <!-- График -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">📈 Распределение по настроениям</h5>
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="sentimentChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Детальные данные -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">📋 Детальные данные</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped" id="dataTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Темы</th>
+                                <th>Настроения</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dataTableBody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Глобальные переменные
+        let allData = null;
+        let currentFilters = {
+            sentiment: null,
+            topic: null
+        };
+        let sentimentChart = null;
+
+        // Инициализация при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeCharts();
+            loadData();
+        });
+
+        // Инициализация графика
+        function initializeCharts() {
+            const sentimentCtx = document.getElementById('sentimentChart').getContext('2d');
+
+            sentimentChart = new Chart(sentimentCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        data: [],
+                        backgroundColor: [
+                            '#28a745', // положительно
+                            '#dc3545', // отрицательно  
+                            '#ffc107', // нейтрально
+                            '#17a2b8',
+                            '#6610f2',
+                            '#fd7e14'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Загрузка данных с сервера
+        async function loadData() {
+            try {
+                const params = new URLSearchParams();
+                if (currentFilters.topic) params.append('topic', currentFilters.topic);
+                if (currentFilters.sentiment) params.append('sentiment', currentFilters.sentiment);
+
+                const response = await fetch(`/api/get-data?${params.toString()}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    allData = data;
+                    updateUI(data);
+                } else {
+                    console.error('Ошибка загрузки данных:', data.error);
+                    showNoDataMessage();
+                }
+            } catch (error) {
+                console.error('Ошибка сети:', error);
+                showNoDataMessage();
+            }
+        }
+
+        // Обновление интерфейса
+        function updateUI(data) {
+            // Обновление статистики
+            document.getElementById('total-reviews').textContent = data.total_count;
+            document.getElementById('unique-topics').textContent = data.all_topics.length;
+            document.getElementById('unique-sentiments').textContent = data.all_sentiments.length;
+
+            // Обновление фильтров
+            updateFilters(data.all_sentiments, data.all_topics);
+
+            // Обновление графиков
+            updateCharts(data.chart_data);
+
+            // Обновление таблицы
+            updateTable(data.predictions);
+        }
+
+        // Обновление фильтров
+        function updateFilters(sentiments, topics) {
+            const sentimentFilters = document.getElementById('sentiment-filters');
+            const topicFilters = document.getElementById('topic-filters');
+
+            // Очищаем старые фильтры (кроме кнопки "Все")
+            sentimentFilters.innerHTML = '<button class="btn btn-outline-primary filter-btn" onclick="filterData(\'sentiment\', null)">Все</button>';
+            topicFilters.innerHTML = '<button class="btn btn-outline-primary filter-btn" onclick="filterData(\'topic\', null)">Все</button>';
+
+            // Добавляем фильтры настроений
+            sentiments.forEach(sentiment => {
+                const button = document.createElement('button');
+                button.className = 'btn btn-outline-primary filter-btn';
+                button.onclick = () => filterData('sentiment', sentiment);
+                button.textContent = sentiment;
+                sentimentFilters.appendChild(button);
+            });
+
+            // Добавляем фильтры тем
+            topics.forEach(topic => {
+                const button = document.createElement('button');
+                button.className = 'btn btn-outline-primary filter-btn';
+                button.onclick = () => filterData('topic', topic);
+                button.textContent = topic;
+                topicFilters.appendChild(button);
+            });
+
+            // Обновляем активные фильтры
+            updateActiveFilters();
+        }
+
+        // Обновление активных фильтров
+        function updateActiveFilters() {
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active-filter');
+            });
+
+            // Подсвечиваем активные фильтры
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                const text = btn.textContent;
+                if ((currentFilters.sentiment === null && text === 'Все' && btn.onclick.toString().includes('sentiment')) ||
+                    (currentFilters.topic === null && text === 'Все' && btn.onclick.toString().includes('topic')) ||
+                    text === currentFilters.sentiment ||
+                    text === currentFilters.topic) {
+                    btn.classList.add('active-filter');
+                }
+            });
+        }
+
+        // Фильтрация данных
+        function filterData(filterType, value) {
+            currentFilters[filterType] = value;
+            updateActiveFilters();
+            loadData();
+        }
+
+        // Очистка всех фильтров
+        function clearFilters() {
+            currentFilters = { sentiment: null, topic: null };
+            updateActiveFilters();
+            loadData();
+        }
+
+        // Обновление графика
+        function updateCharts(chartData) {
+            // Обновление графика настроений
+            if (chartData.sentiment_data.labels.length > 0) {
+                sentimentChart.data.labels = chartData.sentiment_data.labels;
+                sentimentChart.data.datasets[0].data = chartData.sentiment_data.values;
+                sentimentChart.update();
+            }
+        }
+
+        // Обновление таблицы
+        function updateTable(predictions) {
+            const tbody = document.getElementById('dataTableBody');
+            tbody.innerHTML = '';
+
+            predictions.forEach(prediction => {
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = prediction.id;
+                row.insertCell(1).textContent = prediction.topics ? prediction.topics.join(', ') : '';
+                row.insertCell(2).textContent = prediction.sentiments ? prediction.sentiments.join(', ') : '';
+            });
+        }
+
+        // Показ сообщения об отсутствии данных
+        function showNoDataMessage() {
+            document.getElementById('total-reviews').textContent = '0';
+            document.getElementById('unique-topics').textContent = '0';
+            document.getElementById('unique-sentiments').textContent = '0';
+            
+            const tbody = document.getElementById('dataTableBody');
+            tbody.innerHTML = '<tr><td colspan="3" class="text-center">Нет данных для отображения</td></tr>';
+        }
+    </script>
+</body>
+</html>
